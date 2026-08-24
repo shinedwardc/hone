@@ -14,20 +14,12 @@ schema_run_python_file = {
                     "description": "Path of Python file to run"
                 },
                 "args": {
-                    "anyOf": [
-                        {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
-                        },
-                        {
-                            "type": "null"
-                        }
-                    ],
+                    "type": "array",
+                    "items": {"type": "string"},
                     "description": "A list of optional arguments for the Python file to run with",
                 },
             },
+            "required": ["file_path"],
         },
     },
 }
