@@ -133,4 +133,4 @@ All paths are relative to the sandbox root.
 
 ## License
 
-<!-- TODO: add a LICENSE file and name it here. MIT is the usual choice for a portfolio project. -->
+MIT — see [LICENSE](LICENSE).
