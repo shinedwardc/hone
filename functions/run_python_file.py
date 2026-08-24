@@ -51,7 +51,7 @@ def run_python_file(
 
         output: list[str] = []
         if process.returncode:
-            output.append("Process exited with code X")
+            output.append(f"Process exited with code {process.returncode}")
 
         if not process.stdout and not process.stderr:
             output.append("No output produced")

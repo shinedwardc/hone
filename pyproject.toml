@@ -1,7 +1,7 @@
 [project]
-name = "ai-agent"
+name = "hone"
 version = "0.1.0"
-description = "Add your description here"
+description = "A coding agent that reads, runs, and rewrites code inside a directory it cannot escape."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
