@@ -5,7 +5,7 @@
 hone hands a language model four tools — list, read, write, execute — and runs them in a loop until the job is done. Every path the model supplies is resolved and checked against a working-directory root before it touches disk, and the model never gets to pick that root.
 
 ```console
-$ uv run main.py "the calculator gets operator precedence wrong"
+$ uv run hone "the calculator gets operator precedence wrong"
  - Calling function: get_files_info
  - Calling function: get_file_content
  - Calling function: run_python_file
@@ -21,18 +21,21 @@ I added a precedence map and sorted operator application by it. Re-ran
 
 ## Why
 
-Language models are good at proposing fixes and bad at confirming them. Ask one to fix a bug and it will happily describe a change it never ran, to a file it never opened, and call the result "fixed."
+Language models are good at proposing fixes and bad at confirming them. Tool using AI agents narrow the gap, but they have a tendency to run a general test rather than the failing case itself, calling a fix verified on the strength of the edit rather than a re-run with the fixes. A bug report is usually a case the suite doesn't cover. They are prone to report fixes, without ever running and verifying the case you actually reported.
 
-hone is built around the opposite default: the agent has to *look* before it theorizes and *re-run* before it claims. Its system prompt encodes an explicit protocol — reproduce the failure, read the source, state the root cause in one specific sentence, make the smallest change that addresses it, then re-run the same case and verify. It isn't allowed to report a bug fixed unless it re-ran the code in the same turn. Giving a model real filesystem and execution access is only reasonable if you also bound where it can reach and hold it to evidence, so those two things are the design.
+In hone, the agent looks at the codebase before it theorizes and re-run before it claims. It's system prompt encodes an explicit protocol: reproduce the failure, read the source, state the root cause in one specific sentence, make the smallest change that addresses it, then re-run the same case and verify.
+
+The other half of the point is that you pick the provider, and it runs on your machine. Every hosted coding agent decides for you which model reads your code and where that code goes.
+
+hone runs in your terminal, on your checkout, as a normal process. The files it reads are the files on your disk, the code it executes runs in your shell's environment, and the only thing that leaves the machine is the conversation you send to the model you chose, nothing at all if your model is local.
 
 ## What it does
 
-- **The working directory is not the model's to choose.** `working_directory` is injected by the dispatcher after the model's arguments are parsed, so it can't be overridden by anything the model emits. Tools receive relative paths only.
-- **Every path is checked before it's used.** Each tool resolves the target against the sandbox root and refuses anything that lands outside it, returning an error string instead of raising.
-- **Errors go back to the model, not up the stack.** Malformed JSON arguments, unknown function names, and bad signatures all become tool-result messages telling the model what went wrong so it can retry — a stack trace would end the run.
-- **A debugging protocol, not just a system prompt.** The reproduce → read → root-cause → minimal-fix → re-verify loop is spelled out in `prompts.py`, including what to do after three failed attempts.
-- **Every loop is bounded.** 20 tool-calling iterations per run, a 30-second timeout on subprocess execution, and a 10,000-character cap on file reads.
-- **Provider-portable.** Built on the OpenAI SDK against an OpenRouter base URL, so switching models is a one-line change and switching providers is a two-line one.
+- **Clear working directory guidelines.** `working_directory` is injected by the dispatcher after the model's arguments are parsed, so it can't be overridden by anything the model emits. Tools receive relative paths only.
+- **Every path is verified.** Each tool resolves the target against the sandbox root and refuses anything that lands outside it, returning an error string instead of raising.
+- **Errors go back to the model.** Malformed JSON arguments, unknown function names, and bad signatures all become tool-result messages telling the model what went wrong so it can retry.
+- **A debugging protocol, not just a system prompt.** Reproduce → read → root-cause → minimal-fix → re-verify.
+- **Bring your own model, locally or hosted.** Built on the OpenAI SDK, any OpenAI-compatible endpoint works. `--provider` picks a preset (OpenRouter, Anthropic, or a local Ollama server), you can also set `--model` and `--base-url` to override it.
 
 ## Getting started
 
@@ -40,7 +43,7 @@ hone is built around the opposite default: the agent has to *look* before it the
 
 - Python 3.13+
 - [uv](https://docs.astral.sh/uv/)
-- An [OpenRouter](https://openrouter.ai/) API key
+- An API key for one provider: [OpenRouter](https://openrouter.ai/) or a model of your choice.
 
 ### Install
 
@@ -54,28 +57,48 @@ cp .env.example .env    # then add your key
 ### Run
 
 ```bash
-uv run main.py "list the files in this project and tell me what it does"
+uv run hone "list the files in this project and tell me what it does"
 ```
 
 Add `--verbose` to see token counts, the arguments of every tool call, and each tool's return value:
 
 ```console
-$ uv run main.py --verbose "what does pkg/render.py do?"
+$ uv run hone --verbose "what does pkg/render.py do?"
 User prompt: what does pkg/render.py do?
 Prompt tokens: 892
 Response tokens: 31
- - Calling function: get_file_content({'file_path': 'pkg/render.py', 'working_directory': './calculator'})
+ - Calling function: get_file_content({'file_path': 'pkg/render.py', 'working_directory': './examples/calculator'})
 -> def render(expression, result):
        ...
 ```
 
 ## Configuration
 
-| Variable | Required | Default | Notes |
-|---|---|---|---|
-| `OPENROUTER_API_KEY` | Yes | — | Read from `.env` via `python-dotenv`. The program exits with a `RuntimeError` if it isn't set. |
+The endpoint is a **provider preset** — a base URL, a model, and the name of the key it reads. Pick one with `--provider`:
 
-The model (`openrouter/free`) and the sandbox root (`./calculator`) are currently constants in `main.py` and `call_function.py`. Making both configurable is on the roadmap.
+```bash
+uv run hone --provider anthropic "what does pkg/render.py do?"
+uv run hone --provider anthropic --model claude-sonnet-5 "..."
+```
+
+| Provider | Base URL | Default model | Key |
+|---|---|---|---|
+| `openrouter` (default) | `https://openrouter.ai/api/v1` | `openrouter/free` | `OPENROUTER_API_KEY` |
+| `anthropic` | `https://api.anthropic.com/v1/` | `claude-opus-5` | `ANTHROPIC_API_KEY` |
+| `ollama` | `http://localhost:11434/v1` | `qwen2.5-coder` | `OLLAMA_API_KEY` (unused locally) |
+
+Every field resolves as **flag → environment variable → preset default**, so anything not listed above is still reachable without a code change:
+
+| Variable | Flag | Default | Notes |
+|---|---|---|---|
+| `HONE_PROVIDER` | `--provider` | `openrouter` | Selects a row from the table above. |
+| `HONE_MODEL` | `--model` | the preset's model | Any model id the endpoint accepts. |
+| `HONE_BASE_URL` | `--base-url` | the preset's URL | Escape hatch for any OpenAI-compatible endpoint. |
+| `HONE_API_KEY` | — | the preset's key variable | Overrides whichever key variable the provider names. |
+| `HONE_MAX_TOKENS` | — | `8192` | Per-response output cap. |
+| `HONE_SANDBOX_ROOT` | — | `./examples/calculator` | The directory the agent cannot escape. |
+
+Anthropic is reached through its OpenAI-compatible endpoint, which covers chat and tool calling but not extended thinking or prompt caching. Using those would mean adding the native `anthropic` SDK alongside the OpenAI one.
 
 ## The tool surface
 
@@ -94,42 +117,36 @@ All paths are relative to the sandbox root.
   your prompt
        │
        ▼
-  ┌─────────────────────────────────────────────┐
-  │ main.py — the agent loop (max 20 passes)    │
-  └─────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────┐
+  │ hone/cli.py — the agent loop (max 20 passes) │
+  └──────────────────────────────────────────────┘
        │  messages[]                    ▲
        ▼                                │ tool results
-  OpenRouter  ──►  tool_calls? ──no──►  print, exit
+  provider    ──►  tool_calls? ──no──►  print, exit
    (openai SDK)         │
                        yes
                         ▼
-  ┌─────────────────────────────────────────────┐
-  │ call_function.py — dispatch                 │
-  │  · parse JSON args (errors → tool message)  │
-  │  · inject working_directory (not model-set) │
-  │  · route name → callable                    │
-  └─────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────┐
+  │ hone/dispatch.py — tool dispatch             │
+  │  · parse JSON args (errors → tool message)   │
+  │  · inject working_directory (not model-set)  │
+  │  · route name → callable                     │
+  └──────────────────────────────────────────────┘
                         │
                         ▼
-  ┌─────────────────────────────────────────────┐
-  │ functions/*.py — resolve path, check it is  │
-  │ inside the root, then touch disk            │
-  └─────────────────────────────────────────────┘
+  ┌──────────────────────────────────────────────┐
+  │ hone/tools/*.py — resolve path, check it is  │
+  │ inside the root, then touch disk             │
+  └──────────────────────────────────────────────┘
 ```
 
-- **`main.py`** — CLI parsing, client setup, the bounded loop, and the terminal condition (a model response with no tool calls).
-- **`call_function.py`** — turns a tool call into a tool result, converting every failure mode into a message the model can act on.
-- **`functions/`** — the four tools. Each one owns its own schema and its own path check.
-- **`prompts.py`** — the system prompt and the debugging protocol.
-- **`calculator/`** — a small sample app used as the default workspace to exercise the agent against.
+The agent is a single package, `hone/`, plus the sample workspace it ships with:
 
-## Roadmap
-
-- **Harden the sandbox against symlinks.** Path checks currently resolve with `abspath`, which doesn't follow links — a symlink inside the root pointing outside it would escape. Moving to `realpath` closes this, and it deserves a test suite that tries to break in.
-- **A real test suite.** pytest with fixtures that never mutate the sample app, covering dispatch, the iteration cap, and the schemas themselves.
-- **Configurable working directory and model.** `--working-dir` and `--model` flags, so the agent isn't tied to the bundled sample app.
-- **Install as `hone`.** A console entry point, so it's `hone "..."` rather than `uv run main.py "..."`.
-- **Multi-turn sessions.** Today each invocation is one prompt and one process; keeping the conversation alive makes iterating on a fix far cheaper.
+- **`hone/cli.py`** — argument and provider-preset resolution, client setup, the bounded loop, and the terminal condition (a model response with no tool calls).
+- **`hone/dispatch.py`** — turns a tool call into a tool result, converting every failure mode into a message the model can act on.
+- **`hone/tools/`** — the four tools. Each one owns its own schema and its own path check.
+- **`hone/prompts.py`** — the system prompt and the debugging protocol.
+- **`examples/calculator/`** — a small sample app used as the default workspace to exercise the agent against.
 
 ## License
 

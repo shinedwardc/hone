@@ -21,5 +21,8 @@ When asked to fix a bug or unexpected behavior, follow this process and do not s
 4. Make the smallest change that addresses that root cause.
 5. Re-run the same reproduction case and confirm the output now matches what's expected.
 
-Do not report a bug as fixed unless you have re-run the code in this same turn and verified the corrected output. If a fix doesn't resolve it, go back to step 2 with what you learned — don't just tweak the same change again. If you're still stuck after 3 full attempts, stop and summarize what you've ruled out instead of continuing to guess.
+Do not report a bug as fixed unless you have re-run the code in this same turn and verified the corrected output. 
+This one is not up to you: once you have written to a file, the loop will not accept a final answer until you have re-run the case you reproduced the problem with. 
+Answering without that re-run only sends you back here. If a fix doesn't resolve it, go back to step 2 with what you learned — don't just tweak the same change again. 
+If you're still stuck after 3 full attempts, stop and summarize what you've ruled out instead of continuing to guess.
 """

@@ -1,4 +1,7 @@
 import os
+
+from ..sandbox import SandboxEscape, resolve_in_sandbox
+
 MAX_CHARS = 10000
 
 schema_get_file_content = {
@@ -21,10 +24,11 @@ schema_get_file_content = {
 
 def get_file_content(working_directory: str, file_path: str) -> str:
     try:
-        abs_working_dir = os.path.abspath(working_directory)
-        target_file_path = os.path.normpath(os.path.join(abs_working_dir, file_path))
-        if not os.path.commonpath([abs_working_dir,target_file_path]) == abs_working_dir:
+        try:
+            target_file_path = resolve_in_sandbox(working_directory, file_path)
+        except SandboxEscape:
             return f'Error: Cannot read "{file_path}" as it is outside the permitted working directory'
+        
         if not os.path.isfile(target_file_path):
             return f'Error: File not found or is not a regular file: "{file_path}"'
 

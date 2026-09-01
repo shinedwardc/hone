@@ -1,9 +1,12 @@
 import json
+import os
 from collections.abc import Callable
-from functions import get_files_info
-from functions import get_file_content
-from functions import run_python_file
-from functions import write_file
+from .tools import list_dir as get_files_info
+from .tools import read_file as get_file_content
+from .tools import run_python as run_python_file
+from .tools import write_file
+
+SANDBOX_ROOT = os.environ.get("HONE_SANDBOX_ROOT", "./examples/calculator")
 
 available_functions = [
     get_files_info.schema_get_files_info,
@@ -31,7 +34,7 @@ def call_function(tool_call, verbose: bool = False) -> dict:
             ),
         }
 
-    function_args["working_directory"] = "./calculator"
+    function_args["working_directory"] = SANDBOX_ROOT
 
     if verbose:
         print(f" - Calling function: {function_name}({function_args})")

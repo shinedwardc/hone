@@ -1,5 +1,7 @@
 import os
 
+from ..sandbox import SandboxEscape, resolve_in_sandbox
+
 schema_get_files_info = {
     "type": "function",
     "function": {
@@ -19,10 +21,9 @@ schema_get_files_info = {
 
 def get_files_info(working_directory: str, directory: str = ".") -> str:
     try:
-        working_dir_abs = os.path.abspath(working_directory)
-        target_dir = os.path.normpath(os.path.join(working_dir_abs, directory))
-
-        if not os.path.commonpath([working_dir_abs,target_dir]) == working_dir_abs:
+        try:
+            target_dir = resolve_in_sandbox(working_directory, directory)
+        except SandboxEscape:
             return f'Error: Cannot list "{directory}" as it is outside the permitted working directory'
 
         if not os.path.isdir(target_dir):
