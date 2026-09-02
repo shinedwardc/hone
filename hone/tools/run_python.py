@@ -1,24 +1,31 @@
 import os
 import subprocess
+import sys
 
 from ..sandbox import SandboxEscape, resolve_in_sandbox
+
+TIMEOUT_SECONDS = 30
 
 schema_run_python_file = {
     "type": "function",
     "function": {
         "name": "run_python_file",
-        "description": "Run the specified python file with arguments and returns output",
+        "description": (
+            "Run a Python file with the working directory as its cwd. Returns the exit "
+            "code when nonzero, plus STDOUT and STDERR. Times out after "
+            f"{TIMEOUT_SECONDS} seconds."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path of Python file to run"
+                    "description": "Path of the Python file to run, relative to the working directory."
                 },
                 "args": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "A list of optional arguments for the Python file to run with",
+                    "description": "Command-line arguments passed to the file, as a list of strings.",
                 },
             },
             "required": ["file_path"],
@@ -39,8 +46,8 @@ def run_python_file(
             return f'Error: "{file_path}" does not exist or is not a regular file'
         if not file_path.endswith('.py'):
             return f'Error: "{file_path}" is not a Python file'
-        
-        command = ["python", target_file_path]
+
+        command = [sys.executable, target_file_path]
         if args:
             command.extend(args)
 
@@ -49,7 +56,7 @@ def run_python_file(
             cwd=abs_working_directory,
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=TIMEOUT_SECONDS
         )
 
         output: list[str] = []

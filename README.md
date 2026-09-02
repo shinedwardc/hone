@@ -2,21 +2,25 @@
 
 **A coding agent that reads, runs, and rewrites code inside a directory it cannot escape.**
 
-hone hands a language model four tools — list, read, write, execute — and runs them in a loop until the job is done. Every path the model supplies is resolved and checked against a working-directory root before it touches disk, and the model never gets to pick that root.
 
+## Run Example
 ```console
-$ uv run hone "the calculator gets operator precedence wrong"
+$ HONE_SANDBOX_ROOT=./examples/inventory uv run hone --provider anthropic \
+    'main.py "widget:10" totals 27.0 even though tests.py passes; the 10-unit bulk discount should have applied.'
+ - Calling function: get_files_info
+ - Calling function: get_file_content
+ - Calling function: get_file_content
+ - Calling function: get_file_content
  - Calling function: get_files_info
  - Calling function: get_file_content
  - Calling function: run_python_file
  - Calling function: write_file
  - Calling function: run_python_file
+ - Calling function: run_python_file
 Response:
-Root cause: the evaluator applied operators left-to-right in the order they
-appeared, ignoring precedence, so `3 * 4 + 5` was parsed as `3 * (4 + 5)`.
+**Root cause:** `discount_rate` used a strict `>` comparison against each tier's minimum quantity, so a quantity exactly equal to a tier boundary (e.g. 10) fell through with no discount; the tests only check quantities strictly above the boundaries (25, 60), so they never exercised the boundary case, and `expected_total.py` confirms 10 units at the 10% rate should total 24.30.
 
-I added a precedence map and sorted operator application by it. Re-ran
-`main.py "3 * 4 + 5"`: it now returns 17 (was 27).
+**Fix:** Changed the comparison in `discount_rate` (pkg/pricing.py) from `quantity > minimum` to `quantity >= minimum`. Re-running `main.py "widget:10"` now gives total 24.3, matching the expected 24.3 from `expected_total.py`, and `tests.py` still passes (8/8).
 ```
 
 ## Why
@@ -35,7 +39,6 @@ hone runs in your terminal, on your checkout, as a normal process. The files it 
 - **Every path is verified.** Each tool resolves the target against the sandbox root and refuses anything that lands outside it, returning an error string instead of raising.
 - **Errors go back to the model.** Malformed JSON arguments, unknown function names, and bad signatures all become tool-result messages telling the model what went wrong so it can retry.
 - **A debugging protocol, not just a system prompt.** Reproduce → read → root-cause → minimal-fix → re-verify.
-- **Bring your own model, locally or hosted.** Built on the OpenAI SDK, any OpenAI-compatible endpoint works. `--provider` picks a preset (OpenRouter, Anthropic, or a local Ollama server), you can also set `--model` and `--base-url` to override it.
 
 ## Getting started
 
@@ -60,10 +63,13 @@ cp .env.example .env    # then add your key
 uv run hone "list the files in this project and tell me what it does"
 ```
 
-Add `--verbose` to see token counts, the arguments of every tool call, and each tool's return value:
+Add `--verbose` to see the resolved configuration, token counts, the arguments of every tool call, and each tool's return value (previewed at 500 characters — the model still receives all of it):
 
 ```console
 $ uv run hone --verbose "what does pkg/render.py do?"
+Provider: openrouter (https://openrouter.ai/api/v1)
+Model: openrouter/free
+Sandbox: ./examples/calculator
 User prompt: what does pkg/render.py do?
 Prompt tokens: 892
 Response tokens: 31
@@ -71,6 +77,8 @@ Response tokens: 31
 -> def render(expression, result):
        ...
 ```
+
+Without `--verbose`, each step prints only the name of the tool being called.
 
 ## Configuration
 
@@ -84,7 +92,7 @@ uv run hone --provider anthropic --model claude-sonnet-5 "..."
 | Provider | Base URL | Default model | Key |
 |---|---|---|---|
 | `openrouter` (default) | `https://openrouter.ai/api/v1` | `openrouter/free` | `OPENROUTER_API_KEY` |
-| `anthropic` | `https://api.anthropic.com/v1/` | `claude-opus-5` | `ANTHROPIC_API_KEY` |
+| `anthropic` | `https://api.anthropic.com/v1/` | `claude-sonnet-5` | `ANTHROPIC_API_KEY` |
 | `ollama` | `http://localhost:11434/v1` | `qwen2.5-coder` | `OLLAMA_API_KEY` (unused locally) |
 
 Every field resolves as **flag → environment variable → preset default**, so anything not listed above is still reachable without a code change:
@@ -96,20 +104,21 @@ Every field resolves as **flag → environment variable → preset default**, so
 | `HONE_BASE_URL` | `--base-url` | the preset's URL | Escape hatch for any OpenAI-compatible endpoint. |
 | `HONE_API_KEY` | — | the preset's key variable | Overrides whichever key variable the provider names. |
 | `HONE_MAX_TOKENS` | — | `8192` | Per-response output cap. |
-| `HONE_SANDBOX_ROOT` | — | `./examples/calculator` | The directory the agent cannot escape. |
+| `HONE_SANDBOX_ROOT` | — | `./examples/calculator` | The directory the agent cannot escape. Point it at another workspace, e.g. `./examples/inventory`. |
 
-Anthropic is reached through its OpenAI-compatible endpoint, which covers chat and tool calling but not extended thinking or prompt caching. Using those would mean adding the native `anthropic` SDK alongside the OpenAI one.
+Only the selected provider's key has to be set. If neither `HONE_API_KEY` nor the preset's key variable is present, the run exits before making a request and names the variable it looked for.
 
 ## The tool surface
 
-All paths are relative to the sandbox root.
+Four tools touch the filesystem, and all of their paths are relative to the sandbox root. `ask_user` talks to the person instead, so it is the one tool that gets no `working_directory`.
 
 | Tool | Arguments | Behavior |
 |---|---|---|
-| `get_files_info` | `directory` (optional, defaults to root) | Lists entries with byte size and directory flag. |
-| `get_file_content` | `file_path` | Returns contents, truncated at 10,000 characters with a marker. |
-| `write_file` | `file_path`, `content` | Writes or overwrites, creating parent directories as needed. |
-| `run_python_file` | `file_path`, `args` (optional) | Executes with the sandbox root as CWD; returns stdout, stderr, and exit code. 30s timeout. |
+| `get_files_info` | `directory` (optional, defaults to root) | Lists the entries directly inside the directory with byte size and directory flag. Not recursive — call again with a subdirectory. |
+| `get_file_content` | `file_path` | Returns contents, truncated at 10,000 characters with a marker at the cut. |
+| `write_file` | `file_path`, `content` | Overwrites the **entire** file, creating parent directories as needed. There is no partial-edit or patch tool, so the model has to resend the whole file. |
+| `run_python_file` | `file_path`, `args` (optional, list of strings) | Executes with the sandbox root as CWD; returns STDOUT, STDERR, and the exit code when it is nonzero. 30s timeout, `.py` files only. |
+| `ask_user` | `question` | Prints the question and waits for one typed answer. Offered on the first turn only, since a task that never said what to fix is visible before any investigation. Used to strengthen and guide model decisions. |
 
 ## How it works
 
@@ -135,18 +144,10 @@ All paths are relative to the sandbox root.
                         │
                         ▼
   ┌──────────────────────────────────────────────┐
-  │ hone/tools/*.py — resolve path, check it is  │
-  │ inside the root, then touch disk             │
+  │ hone/tools/*.py — call hone/sandbox.py to    │
+  │ resolve the path inside the root, touch disk │
   └──────────────────────────────────────────────┘
 ```
-
-The agent is a single package, `hone/`, plus the sample workspace it ships with:
-
-- **`hone/cli.py`** — argument and provider-preset resolution, client setup, the bounded loop, and the terminal condition (a model response with no tool calls).
-- **`hone/dispatch.py`** — turns a tool call into a tool result, converting every failure mode into a message the model can act on.
-- **`hone/tools/`** — the four tools. Each one owns its own schema and its own path check.
-- **`hone/prompts.py`** — the system prompt and the debugging protocol.
-- **`examples/calculator/`** — a small sample app used as the default workspace to exercise the agent against.
 
 ## License
 

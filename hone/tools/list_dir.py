@@ -6,7 +6,11 @@ schema_get_files_info = {
     "type": "function",
     "function": {
         "name": "get_files_info",
-        "description": "Lists files in a specified directory relative to the working directory, providing file size and directory status",
+        "description": (
+            "List the files and subdirectories directly inside a directory, with each "
+            "entry's size in bytes and whether it is a directory. Not recursive: call "
+            "again with a subdirectory to see inside it."
+        ),
         "parameters": {
             "type": "object",
             "properties": {

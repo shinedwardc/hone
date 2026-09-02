@@ -6,17 +6,25 @@ schema_write_file = {
     "type": "function",
     "function": {
         "name": "write_file",
-        "description": "Write or overwrite content to a specified file in directory",
+        "description": (
+            "Overwrite a file with content, creating the file and any parent "
+            "directories if needed. This replaces the ENTIRE file: there is no partial "
+            "edit or patch tool. Call get_file_content first and resend the complete "
+            "file, or everything you leave out is lost."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "The path of the specified file to write on",
+                    "description": "Path of the file to write, relative to the working directory.",
                 },
                 "content": {
                     "type": "string",
-                    "description": "The content to write or overwrite on to the file",
+                    "description": (
+                    "The complete new contents of the file. Not a diff or a "
+                    "fragment: whatever you send becomes the entire file."
+                ),
                 },
             },
             "required": ["file_path", "content"],

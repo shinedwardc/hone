@@ -4,8 +4,9 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from .dispatch import available_functions, call_function
+from .dispatch import call_function, sandbox_root, tools_for
 from .prompts import system_prompt
+from .tools.ask_user import FALL_BACK
 
 # Presets. Any of these fields can be overridden per-run by a flag or an env var.
 PROVIDERS = {
@@ -17,7 +18,7 @@ PROVIDERS = {
     "anthropic": {
         "base_url": "https://api.anthropic.com/v1/",
         "api_key_env": "ANTHROPIC_API_KEY",
-        "model": "claude-opus-5",
+        "model": "claude-sonnet-5",
     },
     "ollama": {
         "base_url": "http://localhost:11434/v1",
@@ -31,6 +32,12 @@ DEFAULT_MAX_TOKENS = 8192
 MAX_STEPS = 20
 MAX_VERIFY_NUDGES = 2
 VERBOSE_PREVIEW_CHARS = 500
+
+# The window for a question closes the moment the run starts looking at anything.
+ASK_TOO_LATE = (
+    "Error: the time to ask was before you started looking. You have already begun "
+    f"investigating, so what is wrong here is yours to work out. {FALL_BACK}"
+)
 
 VERIFY_NUDGE = (
     "You wrote to a file and have not run anything since, so the fix is unverified. "
@@ -108,9 +115,11 @@ def main() -> None:
     if args.verbose:
         print(f"Provider: {config['provider']} ({config['base_url']})")
         print(f"Model: {config['model']}")
+        print(f"Sandbox: {sandbox_root()}")
 
     verify_pending = False
     nudges = 0
+    may_ask = True
 
     for _ in range(MAX_STEPS):
 
@@ -118,7 +127,7 @@ def main() -> None:
             model=config["model"],
             messages=messages,
             max_tokens=config["max_tokens"],
-            tools=available_functions,
+            tools=tools_for(may_ask),
         )
 
         if not response.usage:
@@ -149,7 +158,20 @@ def main() -> None:
         for tool_call in message.tool_calls:
             if tool_call.type != "function":
                 continue
-            result_message = call_function(tool_call, args.verbose)
+            if tool_call.function.name == "ask_user" and not may_ask:
+                # Not offered any more, but a model can still call a tool it remembers.
+                if args.verbose:
+                    print(" - Refusing ask_user: the run has already started looking")
+                result_message = {
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": ASK_TOO_LATE,
+                }
+            else:
+                result_message = call_function(tool_call, args.verbose)
+            # The first tool call closes the window, the question itself included.
+            may_ask = False
+
             if not result_message["content"]:
                 raise Exception("Tool message should have a non-empty 'content'")
             if args.verbose:

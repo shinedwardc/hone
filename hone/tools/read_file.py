@@ -8,13 +8,17 @@ schema_get_file_content = {
     "type": "function",
     "function": {
         "name": "get_file_content",
-        "description": "Return file content from a specific file in directory",
+        "description": (
+            "Return the text content of a file. Truncated at "
+            f"{MAX_CHARS} characters with a marker at the cut; a truncated read is not "
+            "the whole file, so do not draw conclusions about code you have not seen."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "File path to retrieve content from"
+                    "description": "Path of the file to read, relative to the working directory."
                 },
             },
             "required": ["file_path"]
